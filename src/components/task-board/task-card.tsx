@@ -1,3 +1,4 @@
+
 "use client";
 
 import type * as React from 'react';
@@ -19,6 +20,8 @@ export function TaskCard({ card, listId, onEdit, onDelete, onDragStart }: TaskCa
   const handleDragStart = (e: DragEvent<HTMLDivElement>) => {
     onDragStart(e, card.id, listId);
     e.currentTarget.classList.add('opacity-50', 'shadow-xl');
+    // Set a specific data type for cards, though not strictly necessary with current state-based approach
+    e.dataTransfer.setData('application/task-card-id', card.id); 
   };
 
   const handleDragEnd = (e: DragEvent<HTMLDivElement>) => {
@@ -32,6 +35,7 @@ export function TaskCard({ card, listId, onEdit, onDelete, onDragStart }: TaskCa
       onDragEnd={handleDragEnd}
       className="mb-3 cursor-grab active:cursor-grabbing bg-card shadow-md hover:shadow-lg transition-shadow"
       aria-label={`Task: ${card.title}`}
+      data-card-id={card.id} // Added for easier identification during drop
     >
       <CardHeader className="p-3 pb-2">
         <CardTitle className="text-base font-medium">{card.title}</CardTitle>
@@ -52,3 +56,5 @@ export function TaskCard({ card, listId, onEdit, onDelete, onDragStart }: TaskCa
     </Card>
   );
 }
+
+    

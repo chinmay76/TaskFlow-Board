@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect, DragEvent } from 'react';
@@ -37,23 +38,23 @@ export function TaskBoard() {
     if (savedData) {
       try {
         const parsedData = JSON.parse(savedData);
-        if (Array.isArray(parsedData) && parsedData.length > 0) {
+        if (Array.isArray(parsedData) && parsedData.length > 0 && parsedData.every(l => l.id && l.title && Array.isArray(l.cards))) {
            setLists(parsedData);
         } else {
-          setLists(initialData); // Use initial data if localStorage is empty or malformed
+          setLists(initialData); 
         }
       } catch (error) {
         console.error("Failed to parse task board data from localStorage", error);
-        setLists(initialData); // Fallback to initial data
+        setLists(initialData);
         localStorage.removeItem('taskBoardData');
       }
     } else {
-      setLists(initialData); // Set initial data if nothing in localStorage
+      setLists(initialData);
     }
   }, []);
 
   useEffect(() => {
-    if(lists.length > 0 || localStorage.getItem('taskBoardData')) { // Avoid overwriting initial load with empty array if lists is not yet populated
+    if(lists.length > 0 || localStorage.getItem('taskBoardData')) { 
        localStorage.setItem('taskBoardData', JSON.stringify(lists));
     }
   }, [lists]);
@@ -125,91 +126,153 @@ export function TaskBoard() {
 
   // Drag and Drop handlers
   const handleDragStart = (e: DragEvent<HTMLDivElement>, type: 'card' | 'list', id: string, sourceListId?: string) => {
-    e.dataTransfer.setData('text/plain', id); // Required for Firefox
+    e.dataTransfer.setData('text/plain', id); 
     setDraggedItem({ type, id, sourceListId });
   };
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault(); // Allow drop
+    e.preventDefault(); 
     e.dataTransfer.dropEffect = "move";
   };
 
   const handleDropOnList = (e: DragEvent<HTMLDivElement>, targetListId: string) => {
     e.preventDefault();
-    if (!draggedItem || draggedItem.type !== 'card' || !draggedItem.sourceListId) return;
+    if (!draggedItem || draggedItem.type !== 'card' || !draggedItem.sourceListId) {
+      setDraggedItem(null);
+      return;
+    }
 
-    const cardId = draggedItem.id;
+    const cardIdToMove = draggedItem.id;
     const sourceListId = draggedItem.sourceListId;
 
-    if (sourceListId === targetListId) { // Reordering within the same list
-      const listIndex = lists.findIndex(l => l.id === targetListId);
-      if (listIndex === -1) return;
-      const currentCards = [...lists[listIndex].cards];
-      const draggedCardIndex = currentCards.findIndex(c => c.id === cardId);
-      if (draggedCardIndex === -1) return;
-      
-      const [draggedCard] = currentCards.splice(draggedCardIndex, 1);
-      
-      // Find drop position (simplified: drop at end)
-      // For more precise positioning, calculate based on e.clientY relative to other cards
-      currentCards.push(draggedCard); 
+    const sourceList = lists.find(l => l.id === sourceListId);
+    const cardToMove = sourceList?.cards.find(c => c.id === cardIdToMove);
 
-      setLists(prevLists => prevLists.map(l => l.id === targetListId ? {...l, cards: currentCards} : l));
+    if (!cardToMove) {
+      setDraggedItem(null);
+      return;
+    }
 
-    } else { // Moving card to a different list
-      let cardToMove: Card | undefined;
-      const newLists = lists.map(list => {
+    setLists(currentLists => {
+      // 1. Remove card from source list
+      let listsAfterRemoval = currentLists.map(list => {
         if (list.id === sourceListId) {
-          cardToMove = list.cards.find(c => c.id === cardId);
-          return { ...list, cards: list.cards.filter(c => c.id !== cardId) };
+          return { ...list, cards: list.cards.filter(c => c.id !== cardIdToMove) };
         }
         return list;
       });
 
-      if (cardToMove) {
-        setLists(newLists.map(list => 
-          list.id === targetListId 
-          ? { ...list, cards: [...list.cards, cardToMove!] } 
-          : list
-        ));
-      }
-    }
+      // 2. Add card to target list in the correct position
+      listsAfterRemoval = listsAfterRemoval.map(list => {
+        if (list.id === targetListId) {
+          let newCards = [...list.cards]; // Cards of the target list (already without the card if source === target)
+          
+          const targetElement = e.target as HTMLElement;
+          const closestCardElement = targetElement.closest('[data-card-id]') as HTMLElement | null;
+
+          if (closestCardElement && closestCardElement.dataset.cardId !== cardIdToMove) {
+            const overCardId = closestCardElement.dataset.cardId;
+            const overCardIndex = newCards.findIndex(c => c.id === overCardId);
+
+            if (overCardIndex !== -1) {
+              const rect = closestCardElement.getBoundingClientRect();
+              const isAfter = e.clientY > rect.top + rect.height / 2;
+              newCards.splice(overCardIndex + (isAfter ? 1 : 0), 0, cardToMove);
+            } else {
+              newCards.push(cardToMove); // Fallback if overCardId not in newCards
+            }
+          } else {
+            // Dropped on the list area, not a specific card, or on itself (rare)
+            let inserted = false;
+            const listContentElement = targetElement.closest('.task-list-content');
+            if (listContentElement) {
+                const cardElements = Array.from(listContentElement.querySelectorAll<HTMLElement>('[data-card-id]'));
+                for (let i = 0; i < cardElements.length; i++) {
+                    const cardElem = cardElements[i];
+                    if (cardElem.dataset.cardId === cardIdToMove) continue; 
+
+                    const rect = cardElem.getBoundingClientRect();
+                    if (e.clientY < rect.top + rect.height / 2) { 
+                        const dropTargetCardId = cardElem.dataset.cardId;
+                        const dropIndex = newCards.findIndex(c => c.id === dropTargetCardId);
+                        if (dropIndex !== -1) {
+                            newCards.splice(dropIndex, 0, cardToMove);
+                            inserted = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!inserted) {
+              newCards.push(cardToMove); 
+            }
+          }
+          return { ...list, cards: newCards };
+        }
+        return list;
+      });
+      return listsAfterRemoval;
+    });
     setDraggedItem(null);
   };
 
-  const handleDropOnBoard = (e: DragEvent<HTMLDivElement>) => { // For reordering lists
+  const handleDropOnBoard = (e: DragEvent<HTMLDivElement>) => { 
     e.preventDefault();
-    if (!draggedItem || draggedItem.type !== 'list') return;
+    if (!draggedItem || draggedItem.type !== 'list') {
+      setDraggedItem(null);
+      return;
+    }
 
     const draggedListId = draggedItem.id;
-    const targetElement = e.target as HTMLElement;
-    const targetListCard = targetElement.closest('[data-list-id]');
-    const targetListId = targetListCard?.getAttribute('data-list-id');
     
-    const currentLists = [...lists];
-    const draggedListIndex = currentLists.findIndex(l => l.id === draggedListId);
-    if (draggedListIndex === -1) return;
+    setLists(currentLists => {
+      const draggedListIndex = currentLists.findIndex(l => l.id === draggedListId);
+      if (draggedListIndex === -1) return currentLists;
 
-    const [draggedList] = currentLists.splice(draggedListIndex, 1);
+      const [draggedListObject] = currentLists.splice(draggedListIndex, 1); 
+      
+      let newListsOrder = [...currentLists];
 
-    if (targetListId) {
-      const targetListIndex = currentLists.findIndex(l => l.id === targetListId);
-      if (targetListIndex !== -1) {
-         // Determine if dropping before or after based on mouse position (e.clientX) relative to targetListCard midpoint
-        const rect = targetListCard!.getBoundingClientRect();
-        const isAfter = e.clientX > rect.left + rect.width / 2;
-        currentLists.splice(isAfter ? targetListIndex + 1 : targetListIndex, 0, draggedList);
+      const targetElement = e.target as HTMLElement;
+      const targetListElement = targetElement.closest('[data-list-id]') as HTMLElement | null;
+      
+      if (targetListElement && targetListElement.dataset.listId !== draggedListId) {
+        const targetListId = targetListElement.dataset.listId;
+        const targetListIndexInNew = newListsOrder.findIndex(l => l.id === targetListId);
+
+        if (targetListIndexInNew !== -1) {
+          const rect = targetListElement.getBoundingClientRect();
+          const isAfter = e.clientX > rect.left + rect.width / 2;
+          newListsOrder.splice(targetListIndexInNew + (isAfter ? 1 : 0), 0, draggedListObject);
+        } else {
+          newListsOrder.push(draggedListObject); 
+        }
       } else {
-         currentLists.push(draggedList); // Fallback: add to end if target not found properly
+        // Dropped on board background or on itself
+        let inserted = false;
+        const boardContentElement = e.currentTarget; // The board div itself
+        const listElements = Array.from(boardContentElement.querySelectorAll<HTMLElement>('[data-list-id]'));
+
+        for(let i = 0; i < listElements.length; i++) {
+            const listElem = listElements[i];
+            if (listElem.dataset.listId === draggedListId) continue;
+            const rect = listElem.getBoundingClientRect();
+            if (e.clientX < rect.left + rect.width / 2) { 
+                const dropTargetListId = listElem.dataset.listId;
+                const dropIndex = newListsOrder.findIndex(l => l.id === dropTargetListId);
+                if (dropIndex !== -1) {
+                    newListsOrder.splice(dropIndex, 0, draggedListObject);
+                    inserted = true;
+                    break;
+                }
+            }
+        }
+        if (!inserted) {
+             newListsOrder.push(draggedListObject);
+        }
       }
-    } else {
-      // If not dropped on a specific list, assume end or closest valid drop zone
-      // This simple version adds to the end if not dropped on another list.
-      // More sophisticated logic would involve placeholder elements or positional calculations.
-      currentLists.push(draggedList);
-    }
-    
-    setLists(currentLists);
+      return newListsOrder;
+    });
     setDraggedItem(null);
   };
 
@@ -219,33 +282,36 @@ export function TaskBoard() {
 
 
   return (
-    <div className="h-screen flex flex-col">
-      <header className="p-4 border-b">
+    <div className="h-screen flex flex-col bg-muted/40">
+      <header className="p-4 border-b bg-background shadow-sm">
         <h1 className="text-2xl font-bold text-primary">TaskFlow Board</h1>
       </header>
-      <ScrollArea className="flex-grow p-4">
+      <ScrollArea className="flex-grow">
         <div 
-          className="flex space-x-4 h-full items-start"
+          className="flex space-x-4 h-full items-start p-4"
           onDrop={handleDropOnBoard}
           onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
+          onDragEnd={handleDragEnd} // Added to main board for safety, though list/card drag ends should handle it
         >
           {lists.map(list => (
-            <div key={list.id} data-list-id={list.id}> {/* Wrapper for list drop target detection */}
+            <div key={list.id} data-list-id={list.id} className="h-full"> {/* Wrapper for list drop target detection and full height */}
               <TaskList
                 list={list}
                 onAddCard={addCardToList}
                 onEditCard={openEditCardModal}
                 onDeleteCard={(cardId) => confirmDeleteCard(list.id, cardId)}
                 onDeleteList={() => confirmDeleteList(list.id)}
-                onDragStartCard={(e, cardId, sourceListId) => handleDragStart(e, 'card', cardId, sourceListId)}
+                onDragStartCard={(e, cardId) => handleDragStart(e, 'card', cardId, list.id)} // sourceListId is list.id here
                 onDropOnList={handleDropOnList}
                 onDragOverList={handleDragOver}
                 onDragStartList={(e, listId) => handleDragStart(e, 'list', listId)}
+                onDragEndList={handleDragEnd} // Propagate drag end from list
               />
             </div>
           ))}
-          <CreateListForm onAddList={addList} />
+          <div className="pt-[1px]"> {/* Align with top of TaskList Card */}
+            <CreateListForm onAddList={addList} />
+          </div>
         </div>
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
@@ -270,3 +336,5 @@ export function TaskBoard() {
     </div>
   );
 }
+
+    
