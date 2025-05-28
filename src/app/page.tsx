@@ -1,3 +1,9 @@
+import { TaskBoard } from '@/components/task-board/task-board';
+
 export default function Home() {
-  return <></>;
+  return (
+    <main>
+      <TaskBoard />
+    </main>
+  );
 }
