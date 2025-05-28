@@ -1,4 +1,4 @@
-# Firebase Studio
+Made by chinmay gujar
 
 This is a NextJS starter in Firebase Studio.
 
