@@ -2,13 +2,13 @@
 "use client";
 
 import type * as React from 'react';
-import { useState, DragEvent } from 'react';
+import { useState, DragEvent, useRef, useEffect } from 'react';
 import type { List as ListType, Card as CardType } from '@/lib/types';
 import { TaskCard } from './task-card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { PlusCircle, Trash2, GripVertical } from 'lucide-react';
+import { PlusCircle, Trash2, GripVertical, Edit2 } from 'lucide-react';
 
 interface TaskListProps {
   list: ListType;
@@ -16,11 +16,12 @@ interface TaskListProps {
   onEditCard: (listId: string, card: CardType) => void;
   onDeleteCard: (listId: string, cardId: string) => void;
   onDeleteList: (listId: string) => void;
+  onRenameList: (listId: string, newTitle: string) => void;
   onDragStartCard: (e: DragEvent<HTMLDivElement>, cardId: string, sourceListId: string) => void;
   onDropOnList: (e: DragEvent<HTMLDivElement>, targetListId: string) => void;
   onDragOverList: (e: DragEvent<HTMLDivElement>) => void;
   onDragStartList: (e: DragEvent<HTMLDivElement>, listId: string) => void;
-  onDragEndList: (e: DragEvent<HTMLDivElement>) => void; // Added for consistency
+  onDragEndList: (e: DragEvent<HTMLDivElement>) => void;
 }
 
 export function TaskList({
@@ -29,6 +30,7 @@ export function TaskList({
   onEditCard,
   onDeleteCard,
   onDeleteList,
+  onRenameList,
   onDragStartCard,
   onDropOnList,
   onDragOverList,
@@ -37,6 +39,20 @@ export function TaskList({
 }: TaskListProps) {
   const [newCardTitle, setNewCardTitle] = useState('');
   const [isAddingCard, setIsAddingCard] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editableListTitle, setEditableListTitle] = useState(list.title);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setEditableListTitle(list.title);
+  }, [list.title]);
+  
+  useEffect(() => {
+    if (isEditingTitle && titleInputRef.current) {
+      titleInputRef.current.focus();
+      titleInputRef.current.select();
+    }
+  }, [isEditingTitle]);
 
   const handleAddCardSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,20 +62,33 @@ export function TaskList({
       setIsAddingCard(false);
     }
   };
-  
-  const handleDragStartListInternal = (e: DragEvent<HTMLDivElement>) => {
-    // Prevent card drag from triggering list drag if header is clicked precisely
-    if ((e.target as HTMLElement).closest('[data-card-id]')) {
-        e.stopPropagation(); // Stop card drag from bubbling to list drag
-        return;
+
+  const handleRenameSubmit = () => {
+    if (editableListTitle.trim() && editableListTitle.trim() !== list.title) {
+      onRenameList(list.id, editableListTitle.trim());
     }
-    if (!(e.target as HTMLElement).closest('.list-drag-handle') && !(e.target as HTMLElement).classList.contains('list-drag-handle')) {
-        // Only allow dragging by the handle or the header area not occupied by buttons
-        const headerElement = (e.target as HTMLElement).closest('div[role="button"] > div:first-child'); // targeting the div with grip and title
-        if(!headerElement) {
-            e.preventDefault();
-            return;
-        }
+    setIsEditingTitle(false);
+  };
+  
+  const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleRenameSubmit();
+    } else if (e.key === 'Escape') {
+      setEditableListTitle(list.title);
+      setIsEditingTitle(false);
+    }
+  };
+
+  const handleDragStartListInternal = (e: DragEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('[data-card-id]') || (e.target as HTMLElement).closest('input') || (e.target as HTMLElement).closest('button:not(.list-drag-handle-button)')) {
+      e.stopPropagation();
+      return;
+    }
+    
+    const dragHandleElement = (e.target as HTMLElement).closest('.list-drag-handle');
+    if (!dragHandleElement && !(e.target as HTMLElement).classList.contains('list-drag-handle') && !(e.target as HTMLElement).closest('.card-header-title-area')) {
+         e.preventDefault();
+         return;
     }
     onDragStartList(e, list.id);
     e.currentTarget.classList.add('opacity-75', 'shadow-2xl');
@@ -67,39 +96,74 @@ export function TaskList({
 
   const handleDragEndListInternal = (e: DragEvent<HTMLDivElement>) => {
     e.currentTarget.classList.remove('opacity-75', 'shadow-2xl');
-    onDragEndList(e); // Propagate to parent
+    onDragEndList(e);
   };
 
   return (
     <Card 
-      className="w-72 min-w-[272px] h-full bg-secondary shadow-md flex flex-col max-h-[calc(100vh-10rem)]" // Added max-h for scroll within list
-      onDrop={(e) => { e.stopPropagation(); onDropOnList(e, list.id);}} // Stop propagation to board
-      onDragOver={(e) => { e.stopPropagation(); onDragOverList(e);}} // Stop propagation to board
-      draggable // List itself is draggable
+      className="w-72 min-w-[272px] h-full bg-secondary shadow-md flex flex-col max-h-[calc(100vh-10rem)]"
+      onDrop={(e) => { e.stopPropagation(); onDropOnList(e, list.id);}}
+      onDragOver={(e) => { e.stopPropagation(); onDragOverList(e);}}
+      draggable={!isEditingTitle} // Prevent dragging while editing title
       onDragStart={handleDragStartListInternal}
       onDragEnd={handleDragEndListInternal}
       aria-label={`List: ${list.title}`}
+      data-list-id={list.id}
     >
       <CardHeader 
-        className="p-3 flex flex-row items-center justify-between border-b cursor-grab active:cursor-grabbing list-drag-handle"
-        role="button" // Make header draggable area clear
-        tabIndex={0} // Make it focusable for a11y (though real a11y D&D is complex)
+        className="p-3 flex flex-row items-center justify-between border-b list-drag-handle"
+        role="button"
+        tabIndex={isEditingTitle ? -1 : 0}
       >
-        <div className="flex items-center pointer-events-none"> {/* pointer-events-none for children of drag handle */}
-          <GripVertical className="h-5 w-5 mr-2 text-muted-foreground" />
-          <CardTitle className="text-lg font-semibold">{list.title}</CardTitle>
+        <div className="flex items-center flex-grow min-w-0 card-header-title-area">
+          <GripVertical className="h-5 w-5 mr-2 text-muted-foreground flex-shrink-0 list-drag-handle-button cursor-grab active:cursor-grabbing" />
+          {isEditingTitle ? (
+            <Input
+              ref={titleInputRef}
+              type="text"
+              value={editableListTitle}
+              onChange={(e) => setEditableListTitle(e.target.value)}
+              onBlur={handleRenameSubmit}
+              onKeyDown={handleTitleKeyDown}
+              className="h-8 text-lg font-semibold flex-grow"
+              aria-label="Edit list title"
+            />
+          ) : (
+            <CardTitle 
+              className="text-lg font-semibold truncate cursor-pointer hover:text-primary"
+              onClick={() => setIsEditingTitle(true)}
+              title={list.title}
+            >
+              {list.title}
+            </CardTitle>
+          )}
         </div>
-        <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={(e) => { e.stopPropagation(); onDeleteList(list.id);}} 
-            aria-label="Delete list"
-            onMouseDown={(e) => e.stopPropagation()} // Prevent drag start when clicking button
-        >
-          <Trash2 className="h-4 w-4 text-destructive" />
-        </Button>
+        <div className="flex items-center flex-shrink-0">
+            {!isEditingTitle && (
+                 <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    onClick={() => setIsEditingTitle(true)} 
+                    aria-label="Edit list title"
+                    className="h-8 w-8"
+                    onMouseDown={(e) => e.stopPropagation()}
+                >
+                    <Edit2 className="h-4 w-4" />
+                </Button>
+            )}
+            <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={(e) => { e.stopPropagation(); onDeleteList(list.id);}} 
+                aria-label="Delete list"
+                className="h-8 w-8"
+                onMouseDown={(e) => e.stopPropagation()}
+            >
+            <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+        </div>
       </CardHeader>
-      <CardContent className="p-3 space-y-2 flex-grow min-h-[50px] task-list-content overflow-y-auto"> {/* Added task-list-content class and overflow */}
+      <CardContent className="p-3 space-y-2 flex-grow min-h-[50px] task-list-content overflow-y-auto">
         {list.cards.map((card) => (
           <TaskCard
             key={card.id}
@@ -107,7 +171,7 @@ export function TaskList({
             listId={list.id}
             onEdit={(editedCard) => onEditCard(list.id, editedCard)}
             onDelete={(cardId) => onDeleteCard(list.id, cardId)}
-            onDragStart={onDragStartCard} // Pass directly from props
+            onDragStart={onDragStartCard}
           />
         ))}
         {list.cards.length === 0 && !isAddingCard && (
@@ -116,7 +180,7 @@ export function TaskList({
           </div>
         )}
       </CardContent>
-      <div className="p-3 border-t mt-auto"> {/* mt-auto to push to bottom */}
+      <div className="p-3 border-t mt-auto">
         {isAddingCard ? (
           <form onSubmit={handleAddCardSubmit} className="space-y-2">
             <Input
@@ -140,7 +204,7 @@ export function TaskList({
             variant="ghost" 
             onClick={() => setIsAddingCard(true)} 
             className="w-full justify-start text-muted-foreground hover:text-foreground"
-            onMouseDown={(e) => e.stopPropagation()} // Prevent drag start when clicking button
+            onMouseDown={(e) => e.stopPropagation()}
           >
             <PlusCircle className="mr-2 h-4 w-4" /> Add a card
           </Button>
@@ -149,5 +213,3 @@ export function TaskList({
     </Card>
   );
 }
-
-    
